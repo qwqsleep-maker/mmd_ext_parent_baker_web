@@ -21,11 +21,16 @@ import {
   removeEventFromTrack,
   removeTrackFromDraft,
   resizeTimelineViewport,
+  toBlenderFrame,
+  toBlenderViewport,
+  toDisplayDraft,
+  toDisplayViewport,
   updateEventInTrack,
   updateTrackInDraft,
   validateDraft,
   type BakerDraft,
   type BakerEventDraft,
+  type FrameMode,
   type TimelineViewportState,
 } from "./state";
 import { KeyframeInspector } from "./timeline/KeyframeInspector";
@@ -53,17 +58,20 @@ export function BakerPage() {
   const [loadingScene, setLoadingScene] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  const displayDraft = useMemo(() => toDisplayDraft(draft), [draft]);
+  const displayViewport = useMemo(() => toDisplayViewport(draft, viewport), [draft, viewport]);
   const selectedModel = scene ? findModelByRoot(scene, draft.root_object_name) ?? null : null;
   const referenceIssues = useMemo(() => (scene ? inspectDraftReferences(scene, draft) : null), [draft, scene]);
   const canAddTrack =
     selectedModel !== null &&
     getAvailableSourceBones(scene, draft).length > 0 &&
     draft.source_action_name.trim().length > 0;
-  const selectedTrack = draft.tracks.find((track) => track.id === selection.track_id) ?? null;
+  const realSelectedTrack = draft.tracks.find((track) => track.id === selection.track_id) ?? null;
+  const selectedTrack = displayDraft.tracks.find((track) => track.id === selection.track_id) ?? null;
   const selectedEvent = selectedTrack?.events.find((event) => event.id === selection.event_id) ?? null;
   const selectedTrackBoneOptions = useMemo(
-    () => (selectedTrack ? getAvailableSourceBones(scene, draft, selectedTrack.source_bone_name_j) : []),
-    [draft, scene, selectedTrack],
+    () => (realSelectedTrack ? getAvailableSourceBones(scene, draft, realSelectedTrack.source_bone_name_j) : []),
+    [draft, realSelectedTrack, scene],
   );
 
   useEffect(() => {
@@ -189,7 +197,14 @@ export function BakerPage() {
 
   function handleEventChange(trackId: string, eventId: string, patch: Partial<BakerEventDraft>) {
     resetFeedback();
-    const result = updateEventInTrack(draft, trackId, eventId, patch);
+    const blenderPatch =
+      patch.frame !== undefined
+        ? {
+            ...patch,
+            frame: toBlenderFrame(draft, patch.frame),
+          }
+        : patch;
+    const result = updateEventInTrack(draft, trackId, eventId, blenderPatch);
     setDraft(result.draft);
     setSelection({
       track_id: trackId,
@@ -208,7 +223,7 @@ export function BakerPage() {
 
   function handleMoveKeyframe(trackId: string, eventId: string, frame: number) {
     resetFeedback();
-    const result = updateEventInTrack(draft, trackId, eventId, { frame });
+    const result = updateEventInTrack(draft, trackId, eventId, { frame: toBlenderFrame(draft, frame) });
     setDraft(result.draft);
     setSelection({
       track_id: trackId,
@@ -364,18 +379,71 @@ export function BakerPage() {
                 />
               </label>
 
+              <label className="field">
+                <span>Frame Mode</span>
+                <select
+                  aria-label="Frame Mode"
+                  value={draft.frame_mode}
+                  onChange={(event) => {
+                    resetFeedback();
+                    setDraft((current) => ({
+                      ...current,
+                      frame_mode: event.target.value as FrameMode,
+                    }));
+                  }}
+                >
+                  <option value="blender">Blender Frames</option>
+                  <option value="mmd">MMD Frames</option>
+                </select>
+              </label>
+
+              {draft.frame_mode === "mmd" ? (
+                <div className="field-grid editor-config__mmd-offset">
+                  <label className="field">
+                    <span>Import Timeline Frame</span>
+                    <input
+                      aria-label="Import Timeline Frame"
+                      type="number"
+                      value={draft.mmd_import_frame}
+                      onChange={(event) => {
+                        resetFeedback();
+                        setDraft((current) => ({
+                          ...current,
+                          mmd_import_frame: parseIntegerInput(event.target.value),
+                        }));
+                      }}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Margin</span>
+                    <input
+                      aria-label="Margin"
+                      type="number"
+                      value={draft.mmd_margin}
+                      onChange={(event) => {
+                        resetFeedback();
+                        setDraft((current) => ({
+                          ...current,
+                          mmd_margin: parseIntegerInput(event.target.value),
+                        }));
+                      }}
+                    />
+                  </label>
+                </div>
+              ) : null}
+
               <div className="field-grid editor-config__range">
                 <label className="field">
                   <span>Frame Start</span>
                   <input
                     aria-label="Frame Start"
                     type="number"
-                    value={draft.frame_start}
+                    value={displayDraft.frame_start}
                     onChange={(event) => {
                       resetFeedback();
                       setDraft((current) => ({
                         ...current,
-                        frame_start: Number.parseInt(event.target.value || "0", 10),
+                        frame_start: toBlenderFrame(current, parseIntegerInput(event.target.value)),
                       }));
                     }}
                   />
@@ -385,12 +453,12 @@ export function BakerPage() {
                   <input
                     aria-label="Frame End"
                     type="number"
-                    value={draft.frame_end}
+                    value={displayDraft.frame_end}
                     onChange={(event) => {
                       resetFeedback();
                       setDraft((current) => ({
                         ...current,
-                        frame_end: Number.parseInt(event.target.value || "0", 10),
+                        frame_end: toBlenderFrame(current, parseIntegerInput(event.target.value)),
                       }));
                     }}
                   />
@@ -421,16 +489,16 @@ export function BakerPage() {
 
             <TimelineEditor
               canAddTrack={canAddTrack}
-              draft={draft}
+              draft={displayDraft}
               onAddTrack={handleAddTrack}
               onMoveKeyframe={handleMoveKeyframe}
               onSelectionChange={setSelection}
-              onViewportChange={(nextViewport) => setViewport(nextViewport)}
+              onViewportChange={(nextViewport) => setViewport(toBlenderViewport(draft, nextViewport))}
               referenceIssues={referenceIssues}
               scene={scene}
               selectedModel={selectedModel}
               selection={selection}
-              viewport={viewport}
+              viewport={displayViewport}
             />
           </SectionCard>
         </section>
@@ -472,4 +540,9 @@ export function BakerPage() {
 
 function clampFrame(frame: number, frameStart: number, frameEnd: number) {
   return Math.max(frameStart, Math.min(frameEnd, frame));
+}
+
+function parseIntegerInput(value: string) {
+  const parsed = Number.parseInt(value || "0", 10);
+  return Number.isFinite(parsed) ? parsed : 0;
 }

@@ -202,4 +202,71 @@ describe("BakerPage timeline workflow", () => {
 
     expect((within(inspector).getByLabelText("Frame") as HTMLInputElement).value).toBe("48");
   });
+
+  it("converts MMD frame inputs to Blender frames when submitting", async () => {
+    fetchSceneSummary.mockResolvedValue(sceneSummary);
+    bakeExternalParent.mockResolvedValue({
+      root_object_name: "MikuRoot",
+      armature_object_name: "MikuArmature",
+      output_armature_object_name: "MikuArmature",
+      output_mode: "original_armature_visual",
+      source_action_name: "walk_bone",
+      output_action_name: "walk_bone__extparent_baked",
+      frame_start: 1,
+      frame_end: 180,
+      frame_count: 180,
+      baked_bone_count: 1,
+      track_count: 1,
+    });
+    const user = userEvent.setup();
+
+    render(<BakerPage />);
+
+    await screen.findByDisplayValue("walk_bone");
+    await user.selectOptions(screen.getByLabelText("Frame Mode"), "mmd");
+    fireEvent.change(screen.getByLabelText("Import Timeline Frame"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("Margin"), { target: { value: "2" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Cursor" }), { target: { value: "24" } });
+    await user.click(screen.getByRole("button", { name: "Add Track" }));
+    await user.click(screen.getByRole("button", { name: /Add Keyframe/i }));
+
+    const inspector = screen.getByRole("region", { name: "Keyframe Inspector" });
+    expect((within(inspector).getByLabelText("Frame") as HTMLInputElement).value).toBe("24");
+    await user.selectOptions(within(inspector).getByLabelText("Target Root"), "PropRoot");
+    await user.click(screen.getByRole("button", { name: "Bake External Parent" }));
+
+    expect(bakeExternalParent).toHaveBeenCalledTimes(1);
+    expect(bakeExternalParent.mock.calls[0][1].tracks[0].events[0].frame).toBe(36);
+    expect(bakeExternalParent.mock.calls[0][1].frame_start).toBe(1);
+    expect(bakeExternalParent.mock.calls[0][1].frame_end).toBe(180);
+  });
+
+  it("changes displayed frame numbers without moving existing Blender keyframes", async () => {
+    fetchSceneSummary.mockResolvedValue(sceneSummary);
+    const user = userEvent.setup();
+
+    render(<BakerPage />);
+
+    await screen.findByDisplayValue("walk_bone");
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Cursor" }), { target: { value: "12" } });
+    await user.click(screen.getByRole("button", { name: "Add Track" }));
+    await user.click(screen.getByRole("button", { name: /Add Keyframe/i }));
+
+    let inspector = screen.getByRole("region", { name: "Keyframe Inspector" });
+    expect((within(inspector).getByLabelText("Frame") as HTMLInputElement).value).toBe("12");
+
+    await user.selectOptions(screen.getByLabelText("Frame Mode"), "mmd");
+    fireEvent.change(screen.getByLabelText("Import Timeline Frame"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("Margin"), { target: { value: "2" } });
+
+    inspector = screen.getByRole("region", { name: "Keyframe Inspector" });
+    expect((within(inspector).getByLabelText("Frame") as HTMLInputElement).value).toBe("0");
+    expect(screen.getByRole("button", { name: "Keyframe 0" })).not.toBeNull();
+
+    await user.selectOptions(screen.getByLabelText("Frame Mode"), "blender");
+
+    inspector = screen.getByRole("region", { name: "Keyframe Inspector" });
+    expect((within(inspector).getByLabelText("Frame") as HTMLInputElement).value).toBe("12");
+    expect(screen.getByRole("button", { name: "Keyframe 12" })).not.toBeNull();
+  });
 });

@@ -8,6 +8,7 @@ import {
   createDraftFromScene,
   createEmptySelection,
   createTimelineViewport,
+  getFrameOffset,
   inspectDraftReferences,
   reconcileDraftWithScene,
   resizeViewportWindowAroundFrame,
@@ -17,6 +18,10 @@ import {
   removeEventFromTrack,
   removeTrackFromDraft,
   shiftViewportWindow,
+  toBlenderFrame,
+  toDisplayDraft,
+  toDisplayFrame,
+  toDisplayViewport,
   updateEventInTrack,
   validateDraft,
   type BakerDraft,
@@ -71,9 +76,64 @@ describe("createDraftFromScene", () => {
     expect(draft.output_action_name).toBe("walk_bone__extparent_baked");
     expect(draft.frame_start).toBe(1);
     expect(draft.frame_end).toBe(180);
+    expect(draft.frame_mode).toBe("blender");
+    expect(draft.mmd_import_frame).toBe(1);
+    expect(draft.mmd_margin).toBe(0);
     expect(viewport.cursor_frame).toBe(1);
     expect(viewport.visible_frame_start).toBe(1);
     expect(viewport.visible_frame_end).toBe(96);
+  });
+});
+
+describe("frame mode conversion helpers", () => {
+  it("uses zero offset in Blender frame mode", () => {
+    const draft = createDraftFromScene(sceneSummary);
+
+    expect(getFrameOffset(draft)).toBe(0);
+    expect(toDisplayFrame(draft, 24)).toBe(24);
+    expect(toBlenderFrame(draft, 24)).toBe(24);
+  });
+
+  it("converts between MMD display frames and internal Blender frames", () => {
+    const draft: BakerDraft = {
+      ...createDraftFromScene(sceneSummary),
+      frame_mode: "mmd",
+      mmd_import_frame: 10,
+      mmd_margin: 2,
+    };
+
+    expect(getFrameOffset(draft)).toBe(12);
+    expect(toDisplayFrame(draft, 36)).toBe(24);
+    expect(toBlenderFrame(draft, 24)).toBe(36);
+  });
+
+  it("builds display copies without changing internal Blender frames", () => {
+    let draft: BakerDraft = {
+      ...createDraftFromScene(sceneSummary),
+      frame_mode: "mmd",
+      mmd_import_frame: 10,
+      mmd_margin: 2,
+    };
+    const trackResult = addTrackToDraft(draft, "\u53f3\u624b\u9996");
+    draft = addEventToTrack(trackResult.draft, trackResult.track_id, 36).draft;
+
+    const displayDraft = toDisplayDraft(draft);
+    const displayViewport = toDisplayViewport(draft, {
+      cursor_frame: 36,
+      visible_frame_start: 12,
+      visible_frame_end: 48,
+    });
+
+    expect(draft.frame_start).toBe(1);
+    expect(draft.tracks[0].events[0].frame).toBe(36);
+    expect(displayDraft.frame_start).toBe(-11);
+    expect(displayDraft.frame_end).toBe(168);
+    expect(displayDraft.tracks[0].events[0].frame).toBe(24);
+    expect(displayViewport).toEqual({
+      cursor_frame: 24,
+      visible_frame_start: 0,
+      visible_frame_end: 36,
+    });
   });
 });
 
@@ -343,6 +403,27 @@ describe("scene reconciliation and validation", () => {
       ...sceneSummary,
       models: [sceneSummary.models[0]],
     })).toContain('Event at frame 12 references a missing target root: MissingRoot');
+  });
+
+  it("reports event frame numbers in the current display frame mode", () => {
+    let draft: BakerDraft = {
+      ...createDraftFromScene(sceneSummary),
+      frame_mode: "mmd",
+      mmd_import_frame: 10,
+      mmd_margin: 2,
+    };
+    const trackResult = addTrackToDraft(draft, "\u53f3\u624b\u9996");
+    draft = trackResult.draft;
+    const eventResult = addEventToTrack(draft, trackResult.track_id, 36);
+    draft = updateEventInTrack(eventResult.draft, trackResult.track_id, eventResult.event_id!, {
+      target_root_object_name: "MissingRoot",
+      target_bone_name_j: "\u89aa",
+    }).draft;
+
+    expect(validateDraft(draft, {
+      ...sceneSummary,
+      models: [sceneSummary.models[0]],
+    })).toContain('Event at frame 24 references a missing target root: MissingRoot');
   });
 });
 

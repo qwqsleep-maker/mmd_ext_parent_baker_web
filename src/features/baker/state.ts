@@ -9,6 +9,8 @@ import type {
 export const MIN_VISIBLE_FRAME_COUNT = 24;
 export const DEFAULT_VISIBLE_FRAME_COUNT = 96;
 
+export type FrameMode = "blender" | "mmd";
+
 export interface BakerEventDraft extends ExternalParentEvent {
   id: string;
 }
@@ -19,6 +21,9 @@ export interface BakerTrackDraft extends Omit<ExternalParentTrack, "events"> {
 }
 
 export interface BakerDraft extends Omit<ExternalParentBakeRequest, "tracks"> {
+  frame_mode: FrameMode;
+  mmd_import_frame: number;
+  mmd_margin: number;
   tracks: BakerTrackDraft[];
 }
 
@@ -51,6 +56,9 @@ export function createDraftFromScene(scene: SceneSummary): BakerDraft {
     source_action_name: sourceActionName,
     frame_start: scene.frame_start,
     frame_end: scene.frame_end,
+    frame_mode: "blender",
+    mmd_import_frame: scene.frame_start,
+    mmd_margin: 0,
     output_action_name: buildDefaultOutputActionName(sourceActionName),
     tracks: [],
   };
@@ -242,8 +250,72 @@ export function applyModelSelection(
     source_action_name: sourceActionName,
     frame_start: scene.frame_start,
     frame_end: scene.frame_end,
+    frame_mode: draft.frame_mode,
+    mmd_import_frame: draft.mmd_import_frame,
+    mmd_margin: draft.mmd_margin,
     output_action_name: buildDefaultOutputActionName(sourceActionName),
     tracks: [],
+  };
+}
+
+export function getFrameOffset(draft: Pick<BakerDraft, "frame_mode" | "mmd_import_frame" | "mmd_margin">) {
+  return draft.frame_mode === "mmd" ? normalizeInteger(draft.mmd_import_frame) + normalizeInteger(draft.mmd_margin) : 0;
+}
+
+export function toDisplayFrame(
+  draft: Pick<BakerDraft, "frame_mode" | "mmd_import_frame" | "mmd_margin">,
+  blenderFrame: number,
+) {
+  return normalizeInteger(blenderFrame) - getFrameOffset(draft);
+}
+
+export function toBlenderFrame(
+  draft: Pick<BakerDraft, "frame_mode" | "mmd_import_frame" | "mmd_margin">,
+  displayFrame: number,
+) {
+  return normalizeInteger(displayFrame) + getFrameOffset(draft);
+}
+
+export function toDisplayDraft(draft: BakerDraft): BakerDraft {
+  if (draft.frame_mode === "blender") {
+    return draft;
+  }
+
+  return {
+    ...draft,
+    frame_start: toDisplayFrame(draft, draft.frame_start),
+    frame_end: toDisplayFrame(draft, draft.frame_end),
+    tracks: draft.tracks.map((track) => ({
+      ...track,
+      events: track.events.map((event) => ({
+        ...event,
+        frame: toDisplayFrame(draft, event.frame),
+      })),
+    })),
+  };
+}
+
+export function toDisplayViewport(draft: BakerDraft, viewport: TimelineViewportState): TimelineViewportState {
+  if (draft.frame_mode === "blender") {
+    return viewport;
+  }
+
+  return {
+    cursor_frame: toDisplayFrame(draft, viewport.cursor_frame),
+    visible_frame_start: toDisplayFrame(draft, viewport.visible_frame_start),
+    visible_frame_end: toDisplayFrame(draft, viewport.visible_frame_end),
+  };
+}
+
+export function toBlenderViewport(draft: BakerDraft, viewport: TimelineViewportState): TimelineViewportState {
+  if (draft.frame_mode === "blender") {
+    return viewport;
+  }
+
+  return {
+    cursor_frame: toBlenderFrame(draft, viewport.cursor_frame),
+    visible_frame_start: toBlenderFrame(draft, viewport.visible_frame_start),
+    visible_frame_end: toBlenderFrame(draft, viewport.visible_frame_end),
   };
 }
 
@@ -447,7 +519,7 @@ export function validateDraft(draft: BakerDraft, scene?: SceneSummary): string[]
     const seenFrames = new Set<number>();
     for (const event of track.events) {
       if (seenFrames.has(event.frame)) {
-        errors.push(`Duplicate event frame on track "${track.source_bone_name_j}": ${event.frame}`);
+        errors.push(`Duplicate event frame on track "${track.source_bone_name_j}": ${toDisplayFrame(draft, event.frame)}`);
       }
       seenFrames.add(event.frame);
 
@@ -477,7 +549,7 @@ export function validateDraft(draft: BakerDraft, scene?: SceneSummary): string[]
       const event = findEventById(draft, eventId);
       if (event?.event.target_root_object_name) {
         errors.push(
-          `Event at frame ${event.event.frame} references a missing target root: ${event.event.target_root_object_name}`,
+          `Event at frame ${toDisplayFrame(draft, event.event.frame)} references a missing target root: ${event.event.target_root_object_name}`,
         );
       }
     }
@@ -486,7 +558,7 @@ export function validateDraft(draft: BakerDraft, scene?: SceneSummary): string[]
       const event = findEventById(draft, eventId);
       if (event?.event.target_bone_name_j) {
         errors.push(
-          `Event at frame ${event.event.frame} references a missing target bone: ${event.event.target_bone_name_j}`,
+          `Event at frame ${toDisplayFrame(draft, event.event.frame)} references a missing target bone: ${event.event.target_bone_name_j}`,
         );
       }
     }
@@ -626,6 +698,10 @@ function clampWindowStart(frameStart: number, frameEnd: number, visibleFrameCoun
 
 function clampFrame(frame: number, frameStart: number, frameEnd: number) {
   return Math.max(frameStart, Math.min(frameEnd, Math.round(frame)));
+}
+
+function normalizeInteger(value: number) {
+  return Number.isFinite(value) ? Math.round(value) : 0;
 }
 
 let nextDraftId = 1;
