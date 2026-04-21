@@ -9,10 +9,14 @@ import { BakerPage } from "./BakerPage";
 const fetchSceneSummary = vi.fn();
 const bakeExternalParent = vi.fn();
 
-vi.mock("../../api/client", () => ({
-  fetchSceneSummary: (...args: unknown[]) => fetchSceneSummary(...args),
-  bakeExternalParent: (...args: unknown[]) => bakeExternalParent(...args),
-}));
+vi.mock("../../api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../api/client")>();
+  return {
+    ...actual,
+    fetchSceneSummary: (...args: unknown[]) => fetchSceneSummary(...args),
+    bakeExternalParent: (...args: unknown[]) => bakeExternalParent(...args),
+  };
+});
 
 const sceneSummary = {
   frame_start: 1,
@@ -50,6 +54,7 @@ afterEach(() => {
   cleanup();
   fetchSceneSummary.mockReset();
   bakeExternalParent.mockReset();
+  window.history.replaceState({}, "", "/");
 });
 
 describe("BakerPage timeline workflow", () => {
@@ -57,7 +62,27 @@ describe("BakerPage timeline workflow", () => {
     return container.querySelectorAll(".timeline-row__lane")[1] as HTMLDivElement;
   }
 
+  it("uses apiBaseUrl from the page query string for the initial Blender API base URL", async () => {
+    window.history.replaceState({}, "", "/?apiBaseUrl=http%3A%2F%2F127.0.0.1%3A47001");
+    fetchSceneSummary.mockResolvedValue(sceneSummary);
+
+    render(<BakerPage />);
+
+    await screen.findByDisplayValue("http://127.0.0.1:47001");
+    expect(fetchSceneSummary).toHaveBeenCalledWith("http://127.0.0.1:47001");
+  });
+
+  it("shows an explicit error instead of connecting when bundled UI misses apiBaseUrl", async () => {
+    fetchSceneSummary.mockResolvedValue(sceneSummary);
+
+    render(<BakerPage />);
+
+    expect(await screen.findByText(/Open this page from Blender/i)).not.toBeNull();
+    expect(fetchSceneSummary).not.toHaveBeenCalled();
+  });
+
   it("keeps source configuration in the main editor area and removes global zoom buttons", async () => {
+    window.history.replaceState({}, "", "/?apiBaseUrl=http%3A%2F%2F127.0.0.1%3A37601");
     fetchSceneSummary.mockResolvedValue(sceneSummary);
 
     render(<BakerPage />);
@@ -75,6 +100,7 @@ describe("BakerPage timeline workflow", () => {
   });
 
   it("selects a newly added keyframe and exposes it in the inspector", async () => {
+    window.history.replaceState({}, "", "/?apiBaseUrl=http%3A%2F%2F127.0.0.1%3A37601");
     fetchSceneSummary.mockResolvedValue(sceneSummary);
     const user = userEvent.setup();
 
@@ -96,6 +122,7 @@ describe("BakerPage timeline workflow", () => {
   });
 
   it("moves track controls into a dedicated inspector and keeps rows compact", async () => {
+    window.history.replaceState({}, "", "/?apiBaseUrl=http%3A%2F%2F127.0.0.1%3A37601");
     fetchSceneSummary.mockResolvedValue(sceneSummary);
     const user = userEvent.setup();
 
@@ -115,6 +142,7 @@ describe("BakerPage timeline workflow", () => {
   });
 
   it("switches the right inspector from track mode to keyframe mode when a keyframe is selected", async () => {
+    window.history.replaceState({}, "", "/?apiBaseUrl=http%3A%2F%2F127.0.0.1%3A37601");
     fetchSceneSummary.mockResolvedValue(sceneSummary);
     const user = userEvent.setup();
 
@@ -131,6 +159,7 @@ describe("BakerPage timeline workflow", () => {
   });
 
   it("updates the timeline marker when the inspector frame changes", async () => {
+    window.history.replaceState({}, "", "/?apiBaseUrl=http%3A%2F%2F127.0.0.1%3A37601");
     fetchSceneSummary.mockResolvedValue(sceneSummary);
     const user = userEvent.setup();
 
@@ -149,6 +178,7 @@ describe("BakerPage timeline workflow", () => {
   });
 
   it("selects the existing keyframe when inspector frame changes to an occupied frame", async () => {
+    window.history.replaceState({}, "", "/?apiBaseUrl=http%3A%2F%2F127.0.0.1%3A37601");
     fetchSceneSummary.mockResolvedValue(sceneSummary);
     const user = userEvent.setup();
 
@@ -172,6 +202,7 @@ describe("BakerPage timeline workflow", () => {
   });
 
   it("keeps the selected keyframe after timeline navigation changes", async () => {
+    window.history.replaceState({}, "", "/?apiBaseUrl=http%3A%2F%2F127.0.0.1%3A37601");
     fetchSceneSummary.mockResolvedValue(sceneSummary);
     const user = userEvent.setup();
 
@@ -204,6 +235,7 @@ describe("BakerPage timeline workflow", () => {
   });
 
   it("converts MMD frame inputs to Blender frames when submitting", async () => {
+    window.history.replaceState({}, "", "/?apiBaseUrl=http%3A%2F%2F127.0.0.1%3A37601");
     fetchSceneSummary.mockResolvedValue(sceneSummary);
     bakeExternalParent.mockResolvedValue({
       root_object_name: "MikuRoot",
@@ -242,6 +274,7 @@ describe("BakerPage timeline workflow", () => {
   });
 
   it("changes displayed frame numbers without moving existing Blender keyframes", async () => {
+    window.history.replaceState({}, "", "/?apiBaseUrl=http%3A%2F%2F127.0.0.1%3A37601");
     fetchSceneSummary.mockResolvedValue(sceneSummary);
     const user = userEvent.setup();
 

@@ -19,6 +19,60 @@ type FetchLike = (
   json: () => Promise<unknown>;
 }>;
 
+export interface RuntimeConfig {
+  apiBaseUrl: string;
+  uiBaseUrl?: string;
+}
+
+export async function loadRuntimeConfig(fetchImpl: FetchLike = fetch): Promise<RuntimeConfig | null> {
+  let response;
+  try {
+    response = await fetchImpl("/__mmd_ext_parent_config.json", { method: "GET" });
+  } catch {
+    return null;
+  }
+
+  if (!response.ok) {
+    return null;
+  }
+
+  try {
+    const payload = await response.json();
+    if (!payload || typeof payload !== "object" || !("apiBaseUrl" in payload) || typeof payload.apiBaseUrl !== "string") {
+      return null;
+    }
+    const apiBaseUrl = payload.apiBaseUrl.trim();
+    if (!apiBaseUrl) {
+      return null;
+    }
+    const config: RuntimeConfig = { apiBaseUrl };
+    if ("uiBaseUrl" in payload && typeof payload.uiBaseUrl === "string" && payload.uiBaseUrl.trim()) {
+      config.uiBaseUrl = payload.uiBaseUrl.trim();
+    }
+    return config;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveApiBaseUrlFromSearch(search: string): string | null {
+  const params = new URLSearchParams(search);
+  const candidate = params.get("apiBaseUrl")?.trim();
+  if (!candidate) {
+    return null;
+  }
+
+  try {
+    const parsedUrl = new URL(candidate);
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      return null;
+    }
+    return normalizeBaseUrl(parsedUrl.toString());
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchSceneSummary(
   baseUrl: string,
   fetchImpl: FetchLike = fetch,

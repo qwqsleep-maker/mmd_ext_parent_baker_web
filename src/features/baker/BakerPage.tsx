@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { bakeExternalParent, fetchSceneSummary } from "../../api/client";
+import { bakeExternalParent, fetchSceneSummary, resolveApiBaseUrlFromSearch } from "../../api/client";
 import type { BakeResponse, SceneSummary } from "../../api/types";
 import { ResultCard } from "../../components/ResultCard";
 import { SectionCard } from "../../components/SectionCard";
@@ -75,9 +75,41 @@ export function BakerPage() {
   );
 
   useEffect(() => {
-    void refreshScene();
+    let cancelled = false;
+
+    async function initializeScene() {
+      const resolvedBaseUrl = resolveApiBaseUrlFromSearch(window.location.search);
+      if (cancelled) {
+        return;
+      }
+
+      if (resolvedBaseUrl) {
+        setBaseUrl(resolvedBaseUrl);
+        await refreshScene(resolvedBaseUrl);
+        return;
+      }
+
+      if (import.meta.env.MODE === "development") {
+        setBaseUrl(DEFAULT_BASE_URL);
+        await refreshScene(DEFAULT_BASE_URL);
+        return;
+      }
+
+      const hasApiBaseUrl = new URLSearchParams(window.location.search).has("apiBaseUrl");
+      setBaseUrl("");
+      setSceneError(
+        hasApiBaseUrl
+          ? "Invalid apiBaseUrl query parameter. Open this page from Blender or use a full launch URL."
+          : "Missing apiBaseUrl query parameter. Open this page from Blender or use a full launch URL.",
+      );
+    }
+
+    void initializeScene();
     // Intentional one-shot load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -115,12 +147,13 @@ export function BakerPage() {
     setResult(null);
   }
 
-  async function refreshScene() {
+  async function refreshScene(explicitBaseUrl?: string) {
+    const activeBaseUrl = explicitBaseUrl ?? baseUrl;
     setLoadingScene(true);
     setSceneError(null);
 
     try {
-      const summary = await fetchSceneSummary(baseUrl);
+      const summary = await fetchSceneSummary(activeBaseUrl);
       setScene(summary);
       setDraft((current) =>
         current.root_object_name ? reconcileDraftWithScene(summary, current) : createDraftFromScene(summary),
